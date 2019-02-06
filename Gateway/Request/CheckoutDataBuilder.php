@@ -25,28 +25,29 @@ namespace Adyen\Payment\Gateway\Request;
 
 use Magento\Payment\Gateway\Request\BuilderInterface;
 use Adyen\Payment\Observer\AdyenHppDataAssignObserver;
+use Adyen\Payment\Observer\AdyenBoletoDataAssignObserver;
 
 class CheckoutDataBuilder implements BuilderInterface
 {
-	/**
-	 * @var \Adyen\Payment\Helper\Data
-	 */
-	private $adyenHelper;
+    /**
+     * @var \Adyen\Payment\Helper\Data
+     */
+    private $adyenHelper;
 
-	/**
-	 * @var \Magento\Store\Model\StoreManagerInterface
-	 */
-	private $storeManager;
+    /**
+     * @var \Magento\Store\Model\StoreManagerInterface
+     */
+    private $storeManager;
 
-	/**
-	 * @var \Magento\Checkout\Model\Session
-	 */
-	private $checkoutSession;
+    /**
+     * @var \Magento\Checkout\Model\Session
+     */
+    private $checkoutSession;
 
-	/**
-	 * @var \Magento\Quote\Model\Quote
-	 */
-	private $quote;
+    /**
+     * @var \Magento\Quote\Model\Quote
+     */
+    private $quote;
 
 	/**
 	 * @var \Magento\Tax\Model\Config
@@ -86,19 +87,20 @@ class CheckoutDataBuilder implements BuilderInterface
 		$paymentDataObject =\Magento\Payment\Gateway\Helper\SubjectReader::readPayment($buildSubject);
 		$payment = $paymentDataObject->getPayment();
 		$order = $payment->getOrder();
+		$storeId = $order->getStoreId();
 		$request = [];
 
-		// do not send email
-		$order->setCanSendNewEmailFlag(false);
+        // do not send email
+        $order->setCanSendNewEmailFlag(false);
 
-		$request['paymentMethod']['type'] = $payment->getAdditionalInformation(AdyenHppDataAssignObserver::BRAND_CODE);
+        $request['paymentMethod']['type'] = $payment->getAdditionalInformation(AdyenHppDataAssignObserver::BRAND_CODE);
 
-		// Additional data for payment methods with issuer list
-		if ($payment->getAdditionalInformation(AdyenHppDataAssignObserver::ISSUER_ID)) {
-			$request['paymentMethod']['issuer'] = $payment->getAdditionalInformation(AdyenHppDataAssignObserver::ISSUER_ID);
-		}
+        // Additional data for payment methods with issuer list
+        if ($payment->getAdditionalInformation(AdyenHppDataAssignObserver::ISSUER_ID)) {
+            $request['paymentMethod']['issuer'] = $payment->getAdditionalInformation(AdyenHppDataAssignObserver::ISSUER_ID);
+        }
 
-		$request['returnUrl'] = $this->storeManager->getStore()->getBaseUrl(\Magento\Framework\UrlInterface::URL_TYPE_LINK) . 'adyen/process/result';
+        $request['returnUrl'] = $this->storeManager->getStore()->getBaseUrl(\Magento\Framework\UrlInterface::URL_TYPE_LINK) . 'adyen/process/result';
 
 		// Additional data for open invoice payment
 		if ($payment->getAdditionalInformation("gender")) {
@@ -108,8 +110,8 @@ class CheckoutDataBuilder implements BuilderInterface
 			$request['paymentMethod']['personalDetails']['gender'] = $payment->getAdditionalInformation("gender");
 		}
 
-		if ($payment->getAdditionalInformation("dob")) {
-			$order->setCustomerDob($payment->getAdditionalInformation("dob"));
+        if ($payment->getAdditionalInformation("dob")) {
+            $order->setCustomerDob($payment->getAdditionalInformation("dob"));
 
 			$request['paymentMethod']['personalDetails']['dateOfBirth']= $this->adyenHelper->formatDate($payment->getAdditionalInformation("dob"), 'Y-m-d') ;
 		}
@@ -119,14 +121,14 @@ class CheckoutDataBuilder implements BuilderInterface
 			$request['paymentMethod']['personalDetails']['telephoneNumber']= $payment->getAdditionalInformation("telephone");
 		}
 
-		// Additional data for sepa direct debit
-		if ($payment->getAdditionalInformation("ownerName")) {
-			$request['paymentMethod']['sepa.ownerName']= $payment->getAdditionalInformation("ownerName");
-		}
+        // Additional data for sepa direct debit
+        if ($payment->getAdditionalInformation("ownerName")) {
+            $request['paymentMethod']['sepa.ownerName'] = $payment->getAdditionalInformation("ownerName");
+        }
 
-		if ($payment->getAdditionalInformation("ibanNumber")) {
-			$request['paymentMethod']['sepa.ibanNumber']= $payment->getAdditionalInformation("ibanNumber");
-		}
+        if ($payment->getAdditionalInformation("ibanNumber")) {
+            $request['paymentMethod']['sepa.ibanNumber'] = $payment->getAdditionalInformation("ibanNumber");
+        }
 
 		if ($this->adyenHelper->isPaymentMethodOpenInvoiceMethod(
 			$payment->getAdditionalInformation(AdyenHppDataAssignObserver::BRAND_CODE)
@@ -137,78 +139,121 @@ class CheckoutDataBuilder implements BuilderInterface
 			$request = array_merge($request, $openInvoiceFields);
 		}
 
-		return $request;
-	}
+        //Boleto data
+        if ($payment->getAdditionalInformation("social_security_number")) {
+            $request['socialSecurityNumber'] = $payment->getAdditionalInformation("social_security_number");
+        }
 
-	/**
-	 * @param $formFields
-	 * @return mixed
-	 */
-	protected function getOpenInvoiceData($order)
-	{
-		$formFields = [
-			'lineItems' => []
-		];
+        if ($payment->getAdditionalInformation("firstname")) {
+            $request['shopperName']['firstName'] = $payment->getAdditionalInformation("firstname");
+        }
 
-		$currency = $this->quote->getCurrency();
+        if ($payment->getAdditionalInformation("lastName")) {
+            $request['shopperName']['lastName'] = $payment->getAdditionalInformation("lastName");
+        }
 
-		$discountAmount = 0;
+        if ($payment->getAdditionalInformation(AdyenBoletoDataAssignObserver::BOLETO_TYPE)) {
+            $boletoTypes = $this->adyenHelper->getAdyenBoletoConfigData('boletotypes');
+            $boletoTypes = explode(',', $boletoTypes);
 
-		foreach ($this->quote->getAllVisibleItems() as $item) {
+            if (count($boletoTypes) == 1) {
+                $request['selectedBrand'] = $boletoTypes[0];
+                $request['paymentMethod']['type'] = $boletoTypes[0];
+            } else {
+                $request['selectedBrand'] = $payment->getAdditionalInformation("boleto_type");
+                $request['paymentMethod']['type'] = $payment->getAdditionalInformation("boleto_type");
+            }
 
-			$numberOfItems = (int)$item->getQtyOrdered();
+            $deliveryDays = (int)$this->adyenHelper->getAdyenBoletoConfigData("delivery_days", $storeId);
+            $deliveryDays = (!empty($deliveryDays)) ? $deliveryDays : 5;
+            $deliveryDate = date(
+                "Y-m-d\TH:i:s ",
+                mktime(
+                    date("H"),
+                    date("i"),
+                    date("s"),
+                    date("m"),
+                    date("j") + $deliveryDays,
+                    date("Y")
+                )
+            );
 
-			// Summarize the discount amount item by item
-			$discountAmount += $item->getDiscountAmount();
+            $request['deliveryDate'] = $deliveryDate;
 
-			$priceExcludingTax = $item->getPriceInclTax() - $item->getTaxAmount();
+            $order->setCanSendNewEmailFlag(true);
+        }
+        return $request;
+    }
 
-			$formFields['lineItems'][] = [
-				'amountExcludingTax' => $priceExcludingTax,
-				'taxAmount' => $item->getTaxAmount(),
-				'description' => $item->getName(),
-				'id' => $item->getId(),
-				'quantity' => $item->getQty(),
-				'taxCategory' => $item->getProduct()->getAttributeText('tax_class_id'),
-				'taxPercentage' => $item->getTaxPercent()
-			];
-		}
+    /**
+     * @param $formFields
+     * @return mixed
+     */
+    protected function getOpenInvoiceData($order)
+    {
+        $formFields = [
+            'lineItems' => []
+        ];
 
-		// Discount cost
-		if ($discountAmount != 0) {
+        $currency = $this->quote->getCurrency();
 
-			$description = __('Total Discount');
-			$itemAmount = $this->adyenHelper->formatAmount($discountAmount, $currency);
-			$itemVatAmount = "0";
-			$itemVatPercentage = "0";
-			$numberOfItems = 1;
+        $discountAmount = 0;
 
-			$formFields['lineItems'][] = [
-				'amountExcludingTax' => $itemAmount,
-				'taxAmount' => $itemVatAmount,
-				'description' => $description,
-				'quantity' => $numberOfItems,
-				'taxCategory' => 'None',
-				'taxPercentage' => $itemVatPercentage
-			];
-		}
+        foreach ($this->quote->getAllVisibleItems() as $item) {
 
-		// Shipping cost
-		if ($this->quote->getShippingAddress()->getShippingAmount() > 0 || $this->quote->getShippingAddress()->getShippingTaxAmount() > 0) {
+            $numberOfItems = (int)$item->getQtyOrdered();
 
-			$priceExcludingTax = $this->quote->getShippingAddress()->getShippingAmount() - $this->quote->getShippingAddress()->getShippingTaxAmount();
+            // Summarize the discount amount item by item
+            $discountAmount += $item->getDiscountAmount();
 
-			$taxClassId = $this->taxConfig->getShippingTaxClass($this->storeManager->getStore()->getId());
+            $priceExcludingTax = $item->getPriceInclTax() - $item->getTaxAmount();
 
-			$formFields['lineItems'][] = [
-				'amountExcludingTax' => $priceExcludingTax,
-				'taxAmount' => $this->quote->getShippingAddress()->getShippingTaxAmount(),
-				'description' => $order->getShippingDescription(),
-				'quantity' => 1,
-				'taxPercentage' => $this->quote->getShippingAddress()->getShippingTaxAmount()
-			];
-		}
+            $formFields['lineItems'][] = [
+                'amountExcludingTax' => $priceExcludingTax,
+                'taxAmount' => $item->getTaxAmount(),
+                'description' => $item->getName(),
+                'id' => $item->getId(),
+                'quantity' => $item->getQty(),
+                'taxCategory' => $item->getProduct()->getAttributeText('tax_class_id'),
+                'taxPercentage' => $item->getTaxPercent()
+            ];
+        }
 
-		return $formFields;
-	}
+        // Discount cost
+        if ($discountAmount != 0) {
+
+            $description = __('Total Discount');
+            $itemAmount = $this->adyenHelper->formatAmount($discountAmount, $currency);
+            $itemVatAmount = "0";
+            $itemVatPercentage = "0";
+            $numberOfItems = 1;
+
+            $formFields['lineItems'][] = [
+                'amountExcludingTax' => $itemAmount,
+                'taxAmount' => $itemVatAmount,
+                'description' => $description,
+                'quantity' => $numberOfItems,
+                'taxCategory' => 'None',
+                'taxPercentage' => $itemVatPercentage
+            ];
+        }
+
+        // Shipping cost
+        if ($this->quote->getShippingAddress()->getShippingAmount() > 0 || $this->quote->getShippingAddress()->getShippingTaxAmount() > 0) {
+
+            $priceExcludingTax = $this->quote->getShippingAddress()->getShippingAmount() - $this->quote->getShippingAddress()->getShippingTaxAmount();
+
+            $taxClassId = $this->taxConfig->getShippingTaxClass($this->storeManager->getStore()->getId());
+
+            $formFields['lineItems'][] = [
+                'amountExcludingTax' => $priceExcludingTax,
+                'taxAmount' => $this->quote->getShippingAddress()->getShippingTaxAmount(),
+                'description' => $order->getShippingDescription(),
+                'quantity' => 1,
+                'taxPercentage' => $this->quote->getShippingAddress()->getShippingTaxAmount()
+            ];
+        }
+
+        return $formFields;
+    }
 }
